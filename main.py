@@ -3,10 +3,14 @@ import os
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
+print("🚀 BOT FILE LOADED")
+
 TOKEN = os.getenv("BOT_TOKEN")
+print("TOKEN:", TOKEN)
 
 # ===== DATABASE =====
 def init_db():
+    print("📦 Initializing DB...")
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
@@ -42,13 +46,13 @@ def init_db():
 
     conn.commit()
     conn.close()
+    print("✅ DB READY")
 
-
-# ===== GLOBAL MEMORY (MVP level) =====
 user_data = {}
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("📩 /start received")
     keyboard = [["👤 Работник", "🏢 Работодатель"]]
     await update.message.reply_text(
         "Кто вы?",
@@ -60,10 +64,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.message.from_user.id
 
+    print(f"💬 Message: {text}")
+
     if user_id not in user_data:
         user_data[user_id] = {}
 
-    # === ROLE ===
+    # ROLE
     if text == "👤 Работник":
         user_data[user_id]["role"] = "worker"
         await update.message.reply_text("Введите ваш возраст:")
@@ -75,7 +81,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выберите тип задачи:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
         return
 
-    # === AGE ===
+    # AGE
     if "age" not in user_data[user_id] and user_data[user_id].get("role") == "worker":
         try:
             age = int(text)
@@ -88,14 +94,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Введите число.")
         return
 
-    # === LOCATION WORKER ===
+    # LOCATION WORKER
     if "location" not in user_data[user_id] and user_data[user_id].get("role") == "worker":
         user_data[user_id]["location"] = text
         keyboard = [["Простые задания", "Работа по навыкам"]]
         await update.message.reply_text("Что вы ищете?", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
         return
 
-    # === WORKER CHOICE ===
+    # WORKER CHOICE
     if text == "Простые задания":
         show_tasks(update, "simple")
         return
@@ -104,7 +110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         show_tasks(update, "skill")
         return
 
-    # === EMPLOYER TASK TYPE ===
+    # EMPLOYER TYPE
     if text == "Простая задача":
         user_data[user_id]["task_type"] = "simple"
         await update.message.reply_text("Опишите задачу:")
@@ -116,19 +122,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выберите категорию:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
         return
 
-    # === CATEGORY (ONLY IF SKILL) ===
+    # CATEGORY ONLY FOR SKILL
     if user_data[user_id].get("task_type") == "skill" and "category" not in user_data[user_id]:
         user_data[user_id]["category"] = text
         await update.message.reply_text("Опишите задачу:")
         return
 
-    # === DESCRIPTION ===
+    # DESCRIPTION
     if "description" not in user_data[user_id] and "task_type" in user_data[user_id]:
         user_data[user_id]["description"] = text
         await update.message.reply_text("Введите оплату:")
         return
 
-    # === PAYMENT ===
+    # PAYMENT
     if "payment" not in user_data[user_id]:
         try:
             user_data[user_id]["payment"] = int(text)
@@ -137,19 +143,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Введите число.")
         return
 
-    # === LOCATION TASK ===
+    # LOCATION TASK
     if "task_location" not in user_data[user_id]:
         user_data[user_id]["task_location"] = text
 
         save_task(user_data[user_id])
 
-        await update.message.reply_text("Задача сохранена!")
+        await update.message.reply_text("✅ Задача сохранена!")
         user_data[user_id] = {}
         return
 
 
-# ===== SAVE TASK =====
+# SAVE TASK
 def save_task(data):
+    print("💾 Saving task...")
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
@@ -168,9 +175,10 @@ def save_task(data):
 
     conn.commit()
     conn.close()
+    print("✅ Task saved")
 
 
-# ===== SHOW TASKS =====
+# SHOW TASKS
 def show_tasks(update, task_type):
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
@@ -188,13 +196,21 @@ def show_tasks(update, task_type):
     conn.close()
 
 
-# ===== MAIN =====
+# MAIN
 if __name__ == "__main__":
+    print("🔥 BOT STARTING...")
+
     init_db()
+
+    if not TOKEN:
+        print("❌ TOKEN NOT FOUND")
+    else:
+        print("✅ TOKEN FOUND")
 
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    print("🤖 Bot is running...")
     app.run_polling()
