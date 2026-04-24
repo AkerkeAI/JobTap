@@ -1,23 +1,20 @@
 import sqlite3
 import os
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 user_data = {}
 
-# ===== AI КЛАССИФИКАЦИЯ =====
+# ===== AI =====
 def detect_category(text):
     text = text.lower()
-
-    if any(word in text for word in ["сайт", "код", "бот", "программ", "app"]):
+    if any(w in text for w in ["код", "бот", "сайт"]):
         return "IT"
-    if any(word in text for word in ["инстаграм", "пост", "реклама", "smm"]):
+    if any(w in text for w in ["инстаграм", "реклама", "smm"]):
         return "SMM"
-    if any(word in text for word in ["логотип", "дизайн", "баннер", "фото"]):
+    if any(w in text for w in ["дизайн", "логотип", "баннер"]):
         return "Дизайн"
-
     return "Другое"
 
 # ===== DB =====
@@ -28,7 +25,6 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT,
         category TEXT,
         description TEXT,
         payment INTEGER,
@@ -45,9 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["👤 Работник", "🏢 Работодатель"]]
 
     await update.message.reply_text(
-        "🤖 Здравствуйте, я ваш AI-ассистент JobTab.\n"
-        "Я помогу найти работу или сотрудников.\n\n"
-        "Кто вы?",
+        "🤖 Я AI-ассистент JobTab.\nКто вы?",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
@@ -62,37 +56,46 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ROLE
     if text == "👤 Работник":
         user_data[user_id] = {"role": "worker"}
-        await update.message.reply_text("Введите возраст:")
+        await update.message.reply_text("Введите имя:")
         return
 
     if text == "🏢 Работодатель":
         user_data[user_id] = {"role": "employer"}
-        await update.message.reply_text("Опишите задачу (AI сам определит категорию):")
+        await update.message.reply_text("Опишите задачу:")
         return
 
     # ===== WORKER =====
     if user_data[user_id].get("role") == "worker":
 
-        if "age" not in user_data[user_id]:
-            try:
-                age = int(text)
-                if age < 14:
-                    await update.message.reply_text("Вам нельзя работать.")
-                    return
-                user_data[user_id]["age"] = age
+        if "name" not in user_data[user_id]:
+            user_data[user_id]["name"] = text
+
+            contact_btn = KeyboardButton("📱 Отправить номер", request_contact=True)
+            keyboard = [[contact_btn]]
+
+            await update.message.reply_text(
+                "Отправьте номер:",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+            return
+
+        if "phone" not in user_data[user_id]:
+            if update.message.contact:
+                user_data[user_id]["phone"] = update.message.contact.phone_number
                 await update.message.reply_text("Введите район:")
-            except:
-                await update.message.reply_text("Введите число.")
+            else:
+                await update.message.reply_text("Нажмите кнопку для отправки номера")
             return
 
         if "location" not in user_data[user_id]:
             user_data[user_id]["location"] = text
+
             keyboard = [["IT", "SMM", "Дизайн", "Любое"]]
             await update.message.reply_text("Выберите навык:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
             return
 
         if text in ["IT", "SMM", "Дизайн", "Любое"]:
-            await show_tasks(update, text)
+            await show_tasks(update, text, user_data[user_id])
             return
 
     # ===== EMPLOYER =====
@@ -100,11 +103,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if "description" not in user_data[user_id]:
             user_data[user_id]["description"] = text
-
             category = detect_category(text)
             user_data[user_id]["category"] = category
 
-            await update.message.reply_text(f"AI определил категорию: {category}")
+            await update.message.reply_text(f"AI категория: {category}")
             await update.message.reply_text("Введите оплату:")
             return
 
@@ -113,15 +115,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_data[user_id]["payment"] = int(text.replace(" ", ""))
                 await update.message.reply_text("Введите район:")
             except:
-                await update.message.reply_text("Введите число.")
+                await update.message.reply_text("Введите число")
             return
 
         if "location" not in user_data[user_id]:
             user_data[user_id]["location"] = text
 
             save_task(user_id, user_data[user_id])
-
-            await update.message.reply_text("✅ Задача сохранена!")
+            await update.message.reply_text("✅ Задача сохранена")
             user_data[user_id] = {}
             return
 
@@ -131,15 +132,15 @@ def save_task(user_id, data):
     cursor = conn.cursor()
 
     cursor.execute("""
-    INSERT INTO tasks (type, category, description, payment, location, employer_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, ("skill", data["category"], data["description"], data["payment"], data["location"], user_id))
+    INSERT INTO tasks (category, description, payment, location, employer_id)
+    VALUES (?, ?, ?, ?, ?)
+    """, (data["category"], data["description"], data["payment"], data["location"], user_id))
 
     conn.commit()
     conn.close()
 
 # ===== SHOW =====
-async def show_tasks(update, skill):
+async def show_tasks(update, skill, worker):
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
@@ -149,10 +150,6 @@ async def show_tasks(update, skill):
         cursor.execute("SELECT id, description, payment, location FROM tasks WHERE category=?", (skill,))
 
     tasks = cursor.fetchall()
-
-    if not tasks:
-        await update.message.reply_text("Нет задач.")
-        return
 
     for t in tasks:
         keyboard = InlineKeyboardMarkup([
@@ -171,8 +168,10 @@ async def apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    task_id = int(query.data.split("_")[1])
     user_id = query.from_user.id
+    task_id = int(query.data.split("_")[1])
+
+    worker = user_data.get(user_id, {})
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
@@ -182,10 +181,10 @@ async def apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=employer_id,
-        text=f"📩 Новый отклик!\nUser ID: {user_id}"
+        text=f"📩 Новый отклик!\n\n👤 {worker.get('name')}\n📱 {worker.get('phone')}"
     )
 
-    await query.message.reply_text("✅ Отклик отправлен!")
+    await query.message.reply_text("✅ Отклик отправлен")
 
     conn.close()
 
@@ -197,6 +196,7 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    app.add_handler(MessageHandler(filters.CONTACT, handle))
     app.add_handler(CallbackQueryHandler(apply))
 
     app.run_polling()
