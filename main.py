@@ -48,6 +48,7 @@ def init_db():
     conn.close()
     print("✅ DB READY")
 
+
 user_data = {}
 
 # ===== START =====
@@ -71,90 +72,88 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ROLE
     if text == "👤 Работник":
-        user_data[user_id]["role"] = "worker"
+        user_data[user_id] = {"role": "worker"}
         await update.message.reply_text("Введите ваш возраст:")
         return
 
     if text == "🏢 Работодатель":
-        user_data[user_id]["role"] = "employer"
+        user_data[user_id] = {"role": "employer"}
         keyboard = [["Простая задача", "Навыковая задача"]]
         await update.message.reply_text("Выберите тип задачи:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
         return
 
-    # AGE
-    if "age" not in user_data[user_id] and user_data[user_id].get("role") == "worker":
-        try:
-            age = int(text)
-            if age < 14:
-                await update.message.reply_text("Вам пока нельзя работать.")
-                return
-            user_data[user_id]["age"] = age
-            await update.message.reply_text("Введите ваш район:")
-        except:
-            await update.message.reply_text("Введите число.")
-        return
+    # ===== WORKER FLOW =====
+    if user_data[user_id].get("role") == "worker":
 
-    # LOCATION WORKER
-    if "location" not in user_data[user_id] and user_data[user_id].get("role") == "worker":
-        user_data[user_id]["location"] = text
-        keyboard = [["Простые задания", "Работа по навыкам"]]
-        await update.message.reply_text("Что вы ищете?", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-        return
+        if "age" not in user_data[user_id]:
+            try:
+                age = int(text)
+                if age < 14:
+                    await update.message.reply_text("Вам пока нельзя работать.")
+                    return
+                user_data[user_id]["age"] = age
+                await update.message.reply_text("Введите ваш район:")
+            except:
+                await update.message.reply_text("Введите число.")
+            return
 
-    # WORKER CHOICE
-    if text == "Простые задания":
-        show_tasks(update, "simple")
-        return
+        if "location" not in user_data[user_id]:
+            user_data[user_id]["location"] = text
+            keyboard = [["Простые задания", "Работа по навыкам"]]
+            await update.message.reply_text("Что вы ищете?", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            return
 
-    if text == "Работа по навыкам":
-        show_tasks(update, "skill")
-        return
+        if text == "Простые задания":
+            await show_tasks(update, "simple")
+            return
 
-    # EMPLOYER TYPE
-    if text == "Простая задача":
-        user_data[user_id]["task_type"] = "simple"
-        await update.message.reply_text("Опишите задачу:")
-        return
+        if text == "Работа по навыкам":
+            await show_tasks(update, "skill")
+            return
 
-    if text == "Навыковая задача":
-        user_data[user_id]["task_type"] = "skill"
-        keyboard = [["SMM", "IT", "Дизайн"]]
-        await update.message.reply_text("Выберите категорию:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-        return
+    # ===== EMPLOYER FLOW =====
+    if user_data[user_id].get("role") == "employer":
 
-    # CATEGORY ONLY FOR SKILL
-    if user_data[user_id].get("task_type") == "skill" and "category" not in user_data[user_id]:
-        user_data[user_id]["category"] = text
-        await update.message.reply_text("Опишите задачу:")
-        return
+        if text == "Простая задача":
+            user_data[user_id]["task_type"] = "simple"
+            await update.message.reply_text("Опишите задачу:")
+            return
 
-    # DESCRIPTION
-    if "description" not in user_data[user_id] and "task_type" in user_data[user_id]:
-        user_data[user_id]["description"] = text
-        await update.message.reply_text("Введите оплату:")
-        return
+        if text == "Навыковая задача":
+            user_data[user_id]["task_type"] = "skill"
+            keyboard = [["SMM", "IT", "Дизайн"]]
+            await update.message.reply_text("Выберите категорию:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            return
 
-    # PAYMENT
-    if "payment" not in user_data[user_id]:
-        try:
-            user_data[user_id]["payment"] = int(text)
-            await update.message.reply_text("Введите район:")
-        except:
-            await update.message.reply_text("Введите число.")
-        return
+        if user_data[user_id].get("task_type") == "skill" and "category" not in user_data[user_id]:
+            user_data[user_id]["category"] = text
+            await update.message.reply_text("Опишите задачу:")
+            return
 
-    # LOCATION TASK
-    if "task_location" not in user_data[user_id]:
-        user_data[user_id]["task_location"] = text
+        if "description" not in user_data[user_id] and "task_type" in user_data[user_id]:
+            user_data[user_id]["description"] = text
+            await update.message.reply_text("Введите оплату (только число):")
+            return
 
-        save_task(user_data[user_id])
+        if "payment" not in user_data[user_id]:
+            try:
+                user_data[user_id]["payment"] = int(text.replace(" ", ""))
+                await update.message.reply_text("Введите район:")
+            except:
+                await update.message.reply_text("Введите число без текста.")
+            return
 
-        await update.message.reply_text("✅ Задача сохранена!")
-        user_data[user_id] = {}
-        return
+        if "task_location" not in user_data[user_id]:
+            user_data[user_id]["task_location"] = text
+
+            save_task(user_data[user_id])
+
+            await update.message.reply_text("✅ Задача сохранена!")
+            user_data[user_id] = {}
+            return
 
 
-# SAVE TASK
+# ===== SAVE TASK =====
 def save_task(data):
     print("💾 Saving task...")
     conn = sqlite3.connect("database.db")
@@ -178,8 +177,8 @@ def save_task(data):
     print("✅ Task saved")
 
 
-# SHOW TASKS
-def show_tasks(update, task_type):
+# ===== SHOW TASKS (FIXED) =====
+async def show_tasks(update, task_type):
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
@@ -187,16 +186,16 @@ def show_tasks(update, task_type):
     tasks = cursor.fetchall()
 
     if not tasks:
-        update.message.reply_text("Нет задач.")
+        await update.message.reply_text("Нет задач.")
         return
 
     for t in tasks:
-        update.message.reply_text(f"{t[0]}\n💰 {t[1]} тг\n📍 {t[2]}")
+        await update.message.reply_text(f"{t[0]}\n💰 {t[1]} тг\n📍 {t[2]}")
 
     conn.close()
 
 
-# MAIN
+# ===== MAIN =====
 if __name__ == "__main__":
     print("🔥 BOT STARTING...")
 
