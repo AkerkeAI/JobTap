@@ -145,19 +145,30 @@ async def show_tasks(update, skill, worker):
     cursor = conn.cursor()
 
     if skill == "Любое":
-        cursor.execute("SELECT id, description, payment, location FROM tasks")
+        cursor.execute("SELECT id, description, payment, location, employer_id FROM tasks")
     else:
-        cursor.execute("SELECT id, description, payment, location FROM tasks WHERE category=?", (skill,))
+        cursor.execute(
+            "SELECT id, description, payment, location, employer_id FROM tasks WHERE category=?",
+            (skill,)
+        )
 
     tasks = cursor.fetchall()
 
+    if not tasks:
+        await update.message.reply_text("❌ Пока нет заданий. Попробуйте позже.")
+        return
+
+    await update.message.reply_text("📋 Найдены задания:")
+
     for t in tasks:
+        task_id, desc, pay, loc, employer_id = t
+
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Откликнуться", callback_data=f"apply_{t[0]}")]
+            [InlineKeyboardButton("Откликнуться", callback_data=f"apply_{task_id}")]
         ])
 
         await update.message.reply_text(
-            f"{t[1]}\n💰 {t[2]} тг\n📍 {t[3]}",
+            f"📝 {desc}\n💰 {pay} тг\n📍 {loc}",
             reply_markup=keyboard
         )
 
