@@ -1,29 +1,29 @@
 import sqlite3
 import os
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-
-print("🚀 BOT FILE LOADED")
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-print("TOKEN:", TOKEN)
 
-# ===== DATABASE =====
+user_data = {}
+
+# ===== AI КЛАССИФИКАЦИЯ =====
+def detect_category(text):
+    text = text.lower()
+
+    if any(word in text for word in ["сайт", "код", "бот", "программ", "app"]):
+        return "IT"
+    if any(word in text for word in ["инстаграм", "пост", "реклама", "smm"]):
+        return "SMM"
+    if any(word in text for word in ["логотип", "дизайн", "баннер", "фото"]):
+        return "Дизайн"
+
+    return "Другое"
+
+# ===== DB =====
 def init_db():
-    print("📦 Initializing DB...")
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER,
-        role TEXT,
-        age INTEGER,
-        location TEXT,
-        skills TEXT
-    )
-    """)
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tasks (
@@ -32,40 +32,29 @@ def init_db():
         category TEXT,
         description TEXT,
         payment INTEGER,
-        location TEXT
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS responses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        task_id INTEGER
+        location TEXT,
+        employer_id INTEGER
     )
     """)
 
     conn.commit()
     conn.close()
-    print("✅ DB READY")
-
-
-user_data = {}
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("📩 /start received")
     keyboard = [["👤 Работник", "🏢 Работодатель"]]
+
     await update.message.reply_text(
+        "🤖 Здравствуйте, я ваш AI-ассистент JobTab.\n"
+        "Я помогу найти работу или сотрудников.\n\n"
         "Кто вы?",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
 # ===== HANDLE =====
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.message.from_user.id
-
-    print(f"💬 Message: {text}")
 
     if user_id not in user_data:
         user_data[user_id] = {}
@@ -73,66 +62,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ROLE
     if text == "👤 Работник":
         user_data[user_id] = {"role": "worker"}
-        await update.message.reply_text("Введите ваш возраст:")
+        await update.message.reply_text("Введите возраст:")
         return
 
     if text == "🏢 Работодатель":
         user_data[user_id] = {"role": "employer"}
-        keyboard = [["Простая задача", "Навыковая задача"]]
-        await update.message.reply_text("Выберите тип задачи:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+        await update.message.reply_text("Опишите задачу (AI сам определит категорию):")
         return
 
-    # ===== WORKER FLOW =====
+    # ===== WORKER =====
     if user_data[user_id].get("role") == "worker":
 
         if "age" not in user_data[user_id]:
             try:
                 age = int(text)
                 if age < 14:
-                    await update.message.reply_text("Вам пока нельзя работать.")
+                    await update.message.reply_text("Вам нельзя работать.")
                     return
                 user_data[user_id]["age"] = age
-                await update.message.reply_text("Введите ваш район:")
+                await update.message.reply_text("Введите район:")
             except:
                 await update.message.reply_text("Введите число.")
             return
 
         if "location" not in user_data[user_id]:
             user_data[user_id]["location"] = text
-            keyboard = [["Простые задания", "Работа по навыкам"]]
-            await update.message.reply_text("Что вы ищете?", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            keyboard = [["IT", "SMM", "Дизайн", "Любое"]]
+            await update.message.reply_text("Выберите навык:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
             return
 
-        if text == "Простые задания":
-            await show_tasks(update, "simple")
+        if text in ["IT", "SMM", "Дизайн", "Любое"]:
+            await show_tasks(update, text)
             return
 
-        if text == "Работа по навыкам":
-            await show_tasks(update, "skill")
-            return
-
-    # ===== EMPLOYER FLOW =====
+    # ===== EMPLOYER =====
     if user_data[user_id].get("role") == "employer":
 
-        if text == "Простая задача":
-            user_data[user_id]["task_type"] = "simple"
-            await update.message.reply_text("Опишите задачу:")
-            return
-
-        if text == "Навыковая задача":
-            user_data[user_id]["task_type"] = "skill"
-            keyboard = [["SMM", "IT", "Дизайн"]]
-            await update.message.reply_text("Выберите категорию:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-            return
-
-        if user_data[user_id].get("task_type") == "skill" and "category" not in user_data[user_id]:
-            user_data[user_id]["category"] = text
-            await update.message.reply_text("Опишите задачу:")
-            return
-
-        if "description" not in user_data[user_id] and "task_type" in user_data[user_id]:
+        if "description" not in user_data[user_id]:
             user_data[user_id]["description"] = text
-            await update.message.reply_text("Введите оплату (только число):")
+
+            category = detect_category(text)
+            user_data[user_id]["category"] = category
+
+            await update.message.reply_text(f"AI определил категорию: {category}")
+            await update.message.reply_text("Введите оплату:")
             return
 
         if "payment" not in user_data[user_id]:
@@ -140,49 +113,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_data[user_id]["payment"] = int(text.replace(" ", ""))
                 await update.message.reply_text("Введите район:")
             except:
-                await update.message.reply_text("Введите число без текста.")
+                await update.message.reply_text("Введите число.")
             return
 
-        if "task_location" not in user_data[user_id]:
-            user_data[user_id]["task_location"] = text
+        if "location" not in user_data[user_id]:
+            user_data[user_id]["location"] = text
 
-            save_task(user_data[user_id])
+            save_task(user_id, user_data[user_id])
 
             await update.message.reply_text("✅ Задача сохранена!")
             user_data[user_id] = {}
             return
 
-
-# ===== SAVE TASK =====
-def save_task(data):
-    print("💾 Saving task...")
+# ===== SAVE =====
+def save_task(user_id, data):
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
-    category = data.get("category") if data["task_type"] == "skill" else None
-
     cursor.execute("""
-    INSERT INTO tasks (type, category, description, payment, location)
-    VALUES (?, ?, ?, ?, ?)
-    """, (
-        data["task_type"],
-        category,
-        data["description"],
-        data["payment"],
-        data["task_location"]
-    ))
+    INSERT INTO tasks (type, category, description, payment, location, employer_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, ("skill", data["category"], data["description"], data["payment"], data["location"], user_id))
 
     conn.commit()
     conn.close()
-    print("✅ Task saved")
 
-
-# ===== SHOW TASKS (FIXED) =====
-async def show_tasks(update, task_type):
+# ===== SHOW =====
+async def show_tasks(update, skill):
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
-    cursor.execute("SELECT description, payment, location FROM tasks WHERE type=?", (task_type,))
+    if skill == "Любое":
+        cursor.execute("SELECT id, description, payment, location FROM tasks")
+    else:
+        cursor.execute("SELECT id, description, payment, location FROM tasks WHERE category=?", (skill,))
+
     tasks = cursor.fetchall()
 
     if not tasks:
@@ -190,26 +155,48 @@ async def show_tasks(update, task_type):
         return
 
     for t in tasks:
-        await update.message.reply_text(f"{t[0]}\n💰 {t[1]} тг\n📍 {t[2]}")
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Откликнуться", callback_data=f"apply_{t[0]}")]
+        ])
+
+        await update.message.reply_text(
+            f"{t[1]}\n💰 {t[2]} тг\n📍 {t[3]}",
+            reply_markup=keyboard
+        )
 
     conn.close()
 
+# ===== APPLY =====
+async def apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    task_id = int(query.data.split("_")[1])
+    user_id = query.from_user.id
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT employer_id FROM tasks WHERE id=?", (task_id,))
+    employer_id = cursor.fetchone()[0]
+
+    await context.bot.send_message(
+        chat_id=employer_id,
+        text=f"📩 Новый отклик!\nUser ID: {user_id}"
+    )
+
+    await query.message.reply_text("✅ Отклик отправлен!")
+
+    conn.close()
 
 # ===== MAIN =====
 if __name__ == "__main__":
-    print("🔥 BOT STARTING...")
-
     init_db()
-
-    if not TOKEN:
-        print("❌ TOKEN NOT FOUND")
-    else:
-        print("✅ TOKEN FOUND")
 
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    app.add_handler(CallbackQueryHandler(apply))
 
-    print("🤖 Bot is running...")
     app.run_polling()
